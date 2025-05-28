@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Assistant Kubernetes Diagnostic</title>
+  <style>
+    :root {
+      --blue: #007acc;
+      --dark-blue: #005fa3;
+      --bg-light: #f4f7f8;
+      --card-bg: #ffffff;
+      --text-color: #333;
+      --shadow: rgba(0, 0, 0, 0.1);
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg-light);
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      background: var(--card-bg);
+      border-radius: 16px;
+      box-shadow: 0 4px 16px var(--shadow);
+      padding: 30px;
+      width: 100%;
+      max-width: 700px;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      text-align: center;
+      color: var(--blue);
+      margin-bottom: 30px;
+    }
+
+    label {
+      font-weight: 600;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      resize: vertical;
+      box-sizing: border-box;
+      min-height: 100px;
+      transition: border 0.3s, box-shadow 0.3s;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--blue);
+      box-shadow: 0 0 6px #007acc66;
+    }
+
+    button {
+      margin-top: 16px;
+      width: 100%;
+      padding: 14px;
+      font-size: 1rem;
+      background-color: var(--blue);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: var(--dark-blue);
+    }
+
+    #loading {
+      margin-top: 16px;
+      text-align: center;
+      color: var(--blue);
+    }
+
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid var(--blue);
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 10px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg);}
+      100% { transform: rotate(360deg);}
+    }
+
+    #error {
+      margin-top: 20px;
+      background-color: #fce8e6;
+      color: #d93025;
+      padding: 12px 16px;
+      border-radius: 8px;
+    }
+
+    #response {
+      margin-top: 20px;
+      padding: 20px;
+      background-color: #f9fafb;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px var(--shadow);
+    }
+
+    pre {
+      background: #272822;
+      color: #f8f8f2;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.95rem;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 20px;
+      }
+
+      pre {
+        font-size: 0.85rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Assistant Kubernetes Diagnostic</h1>
+
+    <form id="query-form">
+      <label for="query">Pose ta question :</label>
+      <textarea id="query" name="query" placeholder="Exemple : Pourquoi mon pod est bloqué en Pending ?" required></textarea>
+      <button type="submit">Envoyer</button>
+    </form>
+
+    <div id="loading" style="display:none;">
+      <span class="spinner"></span> Traitement en cours...
+    </div>
+
+    <div id="error" style="display:none;"></div>
+    <div id="response"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById("query-form");
+    const responseDiv = document.getElementById("response");
+    const loadingDiv = document.getElementById("loading");
+    const errorDiv = document.getElementById("error");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorDiv.style.display = "none";
+      responseDiv.textContent = "";
+      loadingDiv.style.display = "inline-block";
+
+      const queryText = document.getElementById("query").value.trim();
+      if (!queryText) {
+        loadingDiv.style.display = "none";
+        errorDiv.textContent = "⚠️ Merci d'entrer une question.";
+        errorDiv.style.display = "block";
+        return;
+      }
+
+      try {
+        const res = await fetch("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: queryText }),
+        });
+
+        loadingDiv.style.display = "none";
+
+        if (!res.ok) {
+          const errJson = await res.json();
+          throw new Error(errJson.error || "Erreur inconnue");
+        }
+
+        const data = await res.json();
+
+        if (data.error) {
+          errorDiv.textContent = `⚠️ ${data.error}`;
+          errorDiv.style.display = "block";
+          return;
+        }
+
+        const rootCauseHTML = `<h2>🛠️ Cause racine :</h2><pre>${escapeHtml(data.root_cause)}</pre>`;
+        const fixHTML = `<h2>✅ Solution proposée :</h2><pre>${escapeHtml(data.fix)}</pre>`;
+
+        responseDiv.innerHTML = rootCauseHTML + fixHTML;
+      } catch (error) {
+        loadingDiv.style.display = "none";
+        errorDiv.textContent = `⚠️ Erreur serveur : ${error.message}`;
+        errorDiv.style.display = "block";
+      }
+    });
+
+    function escapeHtml(text) {
+      const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+      return text.replace(/[&<>"']/g, function (m) { return map[m]; });
+    }
+  </script>
+</body>
+</html>
+
